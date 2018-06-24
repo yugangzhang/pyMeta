@@ -1,0 +1,7 @@
+setup.py
+pyMeta/__init__.py
+pyMeta/pyMeta.py
+pyMeta.egg-info/PKG-INFO
+pyMeta.egg-info/SOURCES.txt
+pyMeta.egg-info/dependency_links.txt
+pyMeta.egg-info/top_level.txt
