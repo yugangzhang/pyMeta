@@ -4,13 +4,135 @@ import pickle as pkl
 import shutil
 from time import gmtime, strftime
 import os
+import h5py
+import numpy as np
+
 flatten_nestlist = lambda l: [item for sublist in l for item in sublist]
 """a function to flatten a nest list
 e.g., flatten( [ ['sg','tt'],'ll' ]   )
 gives ['sg', 'tt', 'l', 'l']
 """
          
+ 
+class H5Data(object):
+    '''Dict class desinged for handling h5py file
+    '''
+    def __init__(self,filename, copy = False ):
+        self.filename = filename
+        now = strftime("%m_%d_%Y", gmtime())        
+        if os.path.isfile( filename ):
+            nf = filename[:-4] + '_copy_%s.h5'%now
+            if copy:
+                shutil.copyfile(filename, nf)
+                print('Make copy of this file with filename as: %s.'%nf) 
+        else:
+            #open(self.filename, 'a').close()
+            self.save_data( [1,2,3], 'None' )
+        self.all_keys=[]       
+        
+    def save_multi_data( self, data_list, key_list, force=False):
+        for (v,k) in list(zip( data_list, key_list )):
+            #print(k,v)
+            self.save_data( v, k, force= force )  
             
+    def save_data( self, data, key, force=False):
+        if isinstance(data, dict):
+            self.save_dict( data, key, force=force)
+        elif isinstance(data, (np.ndarray, list)):
+            self.save_array( data, key, force=force) 
+            
+    def save_dict( self, dic, key=None, force=False):   
+        fout = self.filename 
+        try:
+            keys = self.get_keys()
+        except:
+            keys = []
+        if key not in keys or force is True:
+            with h5py.File(fout, 'a') as hf:
+                if key in keys:
+                    del hf[key]
+                recursively_save_dict_contents_to_group(hf, '/%s/'%key, dic)
+                print( 'This dictionary: %s is exported to %s.'%(key, fout))
+        else:
+            print('This key: %s already exists.'%key)
+            
+    def save_dict2( self, dic, key, force=False):   
+        fout = self.filename        
+        try:
+            keys = self.get_keys()
+        except:
+            keys = []
+        if key not in keys or force is True:            
+            with h5py.File(fout, 'r+') as hf:          
+                if key in keys:
+                    del hf[key]
+                dict_data = hf.create_dataset( key, (1,), dtype='i')
+                for k in list(dic.keys()):   
+                    print(k)
+                    try:
+                        dict_data.attrs[k] = dic[k]
+                        print(k)
+                    except:
+                        pass 
+            print( 'This dictionary: %s is exported to %s.'%(key, fout))
+        else:
+            print('This key: %s already exists.'%key)
+            
+    def save_array(self, array, key, force=False):  
+        fout = self.filename        
+        try:
+            keys = self.get_keys()
+        except:
+            keys = []
+            
+        if key not in keys or force is True:            
+            with h5py.File(fout, 'a') as hf: 
+                if key in keys:
+                    del hf[key]
+                data = hf.create_dataset(name= key, data = array )
+                data.set_fill_value = np.nan 
+                print( 'The array: %s is exported to %s.'%(key, fout))
+        else:
+            print('This key: %s already exists.'%key)
+    
+    def delete_keys(self, key):
+        fout = self.filename 
+        with h5py.File(fout,  "a") as hf:
+            del hf[key]
+            
+    def get_keys(self):
+        fout = self.filename      
+        with h5py.File(fout, 'r') as hf: 
+            return  list(hf.keys() ) 
+        
+    def load_data_notwork(self, key):  
+        try:
+            return self.load_array(key)
+        except:
+            return self.load_dict( key)        
+        
+    def load_array(self, key):
+        fout = self.filename      
+        with h5py.File(fout, 'r') as hf:             
+            return np.array( hf.get( key ) )
+        
+    def load_dict(self, key):
+        fout = self.filename      
+        with h5py.File(fout, 'r') as hf:     
+            return recursively_load_dict_contents_from_group(hf, '/%s/'%key)        
+        
+    def load_dict2(self, key):
+        fout = self.filename      
+        with h5py.File(fout, 'r') as hf: 
+            din = hf.get( key  )   
+            dout = {}
+            for att in din.attrs:        
+                dout[att] =  din.attrs[att]             
+            return dout  
+        
+
+ 
+
 
 def split_slash_str( kstr):
     '''kstr:  string contains / '''
@@ -167,7 +289,74 @@ class metadict(object):
         
             
                 
-                
+######################################
+###Deal with saving dict to hdf5 file
+def save_dict_to_hdf5(dic, filename):
+    """
+    ....
+    """
+    with h5py.File(filename, 'a') as h5file:
+        recursively_save_dict_contents_to_group(h5file, '/', dic)
+
+def load_dict_from_hdf5(filename):
+    """
+    ....
+    """
+    with h5py.File(filename, 'r') as h5file:
+        return recursively_load_dict_contents_from_group(h5file, '/')
+    
+def recursively_save_dict_contents_to_group( h5file, path, dic):
+    """..."""
+    # argument type checking
+    if not isinstance(dic, dict):
+        raise ValueError("must provide a dictionary")        
+        
+    if not isinstance(path, str):
+        raise ValueError("path must be a string")
+    if not isinstance(h5file, h5py._hl.files.File):
+        raise ValueError("must be an open h5py file")
+    # save items to the hdf5 file
+    for key, item in dic.items():
+        #print(key,item)
+        key = str(key)
+        if isinstance(item, list):
+            item = np.array(item)
+            #print(item)
+        if not isinstance(key, str):
+            raise ValueError("dict keys must be strings to save to hdf5")
+        # save strings, numpy.int64, and numpy.float64 types
+        if isinstance(item, (np.int64, np.float64, str, np.float, float, np.float32,int)):
+            #print( 'here' )
+            h5file[path + key] = item
+            if not h5file[path + key].value == item:
+                raise ValueError('The data representation in the HDF5 file does not match the original dict.')
+        # save numpy arrays
+        elif isinstance(item, np.ndarray):            
+            try:
+                h5file[path + key] = item
+            except:
+                item = np.array(item).astype('|S9')
+                h5file[path + key] = item
+            if not np.array_equal(h5file[path + key].value, item):
+                raise ValueError('The data representation in the HDF5 file does not match the original dict.')
+        # save dictionaries
+        elif isinstance(item, dict):
+            recursively_save_dict_contents_to_group(h5file, path + key + '/', item)
+        # other types cannot be saved and will result in an error
+        else:
+            #print(item)
+            raise ValueError('Cannot save %s type.' % type(item))
+            
+            
+def recursively_load_dict_contents_from_group( h5file, path):
+    """..."""
+    ans = {}
+    for key, item in h5file[path].items():
+        if isinstance(item, h5py._hl.dataset.Dataset):
+            ans[key] = item.value
+        elif isinstance(item, h5py._hl.group.Group):
+            ans[key] = recursively_load_dict_contents_from_group(h5file, path + key + '/')
+    return ans                    
         
         
         
